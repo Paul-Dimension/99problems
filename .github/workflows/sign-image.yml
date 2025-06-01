@@ -26,24 +26,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get image digest
-        id: get-digest
+      - name: Pull image to get digest
         run: |
-          # Use exact lowercase repository name
+          # Force lowercase repository name
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_REF="ghcr.io/${REPO_NAME}:main"
           
-          # Get digest using docker manifest inspect
-          DIGEST=$(docker manifest inspect ${IMAGE_REF} -v | \
-            jq -r 'if .Descriptor.digest then .Descriptor.digest else .manifests[0].digest end')
+          # Pull the image to get the exact digest
+          docker pull ${IMAGE_REF}
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${IMAGE_REF} | cut -d'@' -f2)
           
           echo "Image reference: ${IMAGE_REF}"
           echo "Image digest: ${DIGEST}"
-          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+          echo "DIGEST=${DIGEST}" >> $GITHUB_ENV
 
       - name: Sign image with Cosign
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          cosign sign --yes "ghcr.io/${REPO_NAME}@${{ steps.get-digest.outputs.digest}}"
+          FULL_REF="ghcr.io/${REPO_NAME}@${DIGEST}"
+          echo "Signing ${FULL_REF}"
+          cosign sign --yes "${FULL_REF}"
