@@ -1,4 +1,4 @@
-name: Sign Container Image
+name: "Sign Container Image"
 
 on:
   push:
@@ -8,7 +8,7 @@ jobs:
   sign-image:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # 🔐 Это важно для OIDC keyless signing
+      id-token: write
       contents: read
 
     steps:
