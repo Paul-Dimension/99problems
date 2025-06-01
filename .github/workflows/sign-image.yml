@@ -10,16 +10,25 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      packages: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Cosign
+      - name: Install Cosign and Crane
         uses: sigstore/cosign-installer@v3.5.0
+        with:
+          cosign-release: 'v2.0.0'
+      
+      - name: Install Crane
+        run: go install github.com/google/go-containerregistry/cmd/crane@latest
 
       - name: Sign image with Cosign (keyless)
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          cosign sign ghcr.io/paul-dimension/ci_cd_for_container_images_2:main
+          # Get the exact digest of the image
+          DIGEST=$(crane digest ghcr.io/${{ github.repository }}:main)
+          # Sign using the digest
+          cosign sign --yes "ghcr.io/${{ github.repository }}@${DIGEST}"

@@ -55,9 +55,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
 
-      - name: Print image digest
-        run: echo "Image digest is ${{ steps.build-and-push.outputs.digest }}"
-
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3.5.0
 
