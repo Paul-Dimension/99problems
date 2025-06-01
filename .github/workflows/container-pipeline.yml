@@ -1,86 +1,76 @@
-name: "0-Container Deployment Pipeline"
+name: Container Deployment Pipeline
 
 on:
   push:
-    branches: [ "main" ]
-    tags: [ 'v*.*.*' ]
-  pull_request:
-    branches: [ "main" ]
+    branches: [main]
   workflow_dispatch:
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  AWS_REGION: 'us-east-1'
+  ECR_REPO: ${{ github.repository }}
+  IMAGE_TAG: 'latest'
 
 jobs:
-  integration:
-    uses: ./.github/workflows/integrate-python-app.yml
-    permissions:
-      contents: read
-
-  delivery:
-    needs: [integration]
+  build-and-push-to-ecr:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+    - name: Build and push Docker image
+      run: |
+        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }} .
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
 
-      - name: Build and push Docker image
-        id: build-and-push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+  deploy-to-staging:
+    needs: build-and-push-to-ecr
+    runs-on: ubuntu-latest
+    environment: Staging
+    
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.5.0
+    - name: Verify ECR image
+      run: |
+        aws ecr describe-images \
+          --repository-name ${{ env.ECR_REPO }} \
+          --image-ids imageTag=${{ env.IMAGE_TAG }}
 
-      - name: Sign the published Docker image
-        env:
-          COSIGN_EXPERIMENTAL: "true"
-        run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          DIGEST="${{ steps.build-and-push.outputs.digest }}"
-          echo "Signing ${IMAGE}@${DIGEST}"
-          cosign sign --yes "${IMAGE}@${DIGEST}"
+  deploy-to-production:
+    needs: deploy-to-staging
+    runs-on: ubuntu-latest
+    environment: Production
+    
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-  deploy-staging:
-    needs: [delivery]
-    uses: ./.github/workflows/deploy-aws-app-runner.yml
-    with:
-      environment: Staging
-    permissions:
-      packages: read
-    secrets: inherit
-
-  deploy-production:
-    needs: [deploy-staging]
-    uses: ./.github/workflows/deploy-aws-app-runner.yml
-    with:
-      environment: Production
-    permissions:
-      packages: read
-    secrets: inherit
+    - name: Trigger App Runner deployment
+      run: |
+        aws apprunner start-deployment \
+          --service-arn "${{ vars.PRODUCTION_SERVICE_ARN }}"
