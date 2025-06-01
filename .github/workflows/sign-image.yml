@@ -10,29 +10,44 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      packages: write  # This is crucial for signing permissions
+      packages: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Cosign
+      - name: Install Cosign and Crane
         uses: sigstore/cosign-installer@v3.5.0
-
-      - name: Get exact image reference
-        id: image-ref
+        with:
+          cosign-release: 'v2.0.0'
+      
+      - name: Install Crane
         run: |
-          # Force lowercase repository name
-          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "repo_name=${REPO_NAME}" >> $GITHUB_OUTPUT
+          sudo apt-get update
+          sudo apt-get install -y curl jq
+          curl -sL https://github.com/google/go-containerregistry/releases/download/v0.13.0/go-containerregistry_Linux_x86_64.tar.gz | \
+            sudo tar -xz -C /usr/local/bin crane
 
-      - name: Sign image with Cosign (using tag reference)
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign container image
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          # Use the lowercase repository name
-          IMAGE_REF="ghcr.io/${{ steps.image-ref.outputs.repo_name }}:main"
+          # Use exact repository name (case-sensitive)
+          REPO_NAME="${{ github.repository }}"
+          IMAGE_TAG="main"
+          IMAGE_REF="ghcr.io/${REPO_NAME}:${IMAGE_TAG}"
           
-          # Sign using the tag reference (with --force flag)
-          echo "Signing image: ${IMAGE_REF}"
-          cosign sign --force --yes "${IMAGE_REF}"
+          # Get digest using crane
+          echo "Getting digest for ${IMAGE_REF}"
+          DIGEST=$(crane digest "${IMAGE_REF}")
+          
+          # Sign using digest (recommended approach)
+          echo "Signing image: ghcr.io/${REPO_NAME}@${DIGEST}"
+          cosign sign --yes "ghcr.io/${REPO_NAME}@${DIGEST}"
