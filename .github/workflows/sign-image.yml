@@ -16,13 +16,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Cosign and Crane
+      - name: Install Cosign
         uses: sigstore/cosign-installer@v3.5.0
         with:
           cosign-release: 'v2.0.0'
       
       - name: Install Crane
-        run: go install github.com/google/go-containerregistry/cmd/crane@latest
+        run: |
+          # Install Go if not already present
+          if ! command -v go &> /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y golang-go
+          fi
+          # Install crane
+          go install github.com/google/go-containerregistry/cmd/crane@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Sign image with Cosign (keyless)
         env:
@@ -30,5 +38,6 @@ jobs:
         run: |
           # Get the exact digest of the image
           DIGEST=$(crane digest ghcr.io/${{ github.repository }}:main)
+          echo "Image digest: $DIGEST"
           # Sign using the digest
           cosign sign --yes "ghcr.io/${{ github.repository }}@${DIGEST}"
