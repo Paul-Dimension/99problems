@@ -7,7 +7,6 @@ on:
 
 env:
   AWS_REGION: 'us-east-1'
-  ECR_REPO: ${{ github.repository }}
   IMAGE_TAG: 'latest'
 
 jobs:
@@ -33,10 +32,17 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v1
 
+    - name: Prepare lowercase repo name
+      id: repo-name
+      run: |
+        # Convert to lowercase and replace slashes
+        LOWERCASE_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]' | sed 's/\//-/g')
+        echo "repo_name=${LOWERCASE_REPO}" >> $GITHUB_OUTPUT
+
     - name: Build and push Docker image
       run: |
-        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }} .
-        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
+        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ steps.repo-name.outputs.repo_name }}:${{ env.IMAGE_TAG }} .
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ steps.repo-name.outputs.repo_name }}:${{ env.IMAGE_TAG }}
 
   deploy-to-staging:
     needs: build-and-push-to-ecr
@@ -53,8 +59,9 @@ jobs:
 
     - name: Verify ECR image
       run: |
+        LOWERCASE_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]' | sed 's/\//-/g')
         aws ecr describe-images \
-          --repository-name ${{ env.ECR_REPO }} \
+          --repository-name ${LOWERCASE_REPO} \
           --image-ids imageTag=${{ env.IMAGE_TAG }}
 
   deploy-to-production:
