@@ -1,4 +1,4 @@
-name: Container Deployment Pipeline
+name: ECR Deployment Pipeline
 
 on:
   push:
@@ -11,13 +11,13 @@ env:
   IMAGE_TAG: 'latest'
 
 jobs:
-  build-and-push-to-ecr:
+  deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -30,36 +30,34 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Login to Amazon ECR
-      id: login-ecr
+      id: ecr-login
       uses: aws-actions/amazon-ecr-login@v1
       with:
         mask-password: 'true'
 
-    - name: Create ECR repository if not exists
+    - name: Ensure ECR repository exists
+      id: ecr-repo
       run: |
-        if ! aws ecr describe-repositories --repository-names ${{ env.ECR_REPO }} >/dev/null 2>&1; then
-          aws ecr create-repository --repository-name ${{ env.ECR_REPO }}
-          echo "Repository ${{ env.ECR_REPO }} created"
+        if aws ecr describe-repositories --repository-names ${{ env.ECR_REPO }} >/dev/null 2>&1; then
+          echo "Repository exists"
+          echo "repository_uri=$(aws ecr describe-repositories --repository-names ${{ env.ECR_REPO }} --query 'repositories[0].repositoryUri' --output text)" >> $GITHUB_OUTPUT
         else
-          echo "Repository ${{ env.ECR_REPO }} already exists"
+          echo "Creating new repository"
+          echo "repository_uri=$(aws ecr create-repository --repository-name ${{ env.ECR_REPO }} --query 'repository.repositoryUri' --output text)" >> $GITHUB_OUTPUT
         fi
 
     - name: Build Docker image
       run: |
-        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }} .
+        docker build -t ${{ steps.ecr-repo.outputs.repository_uri }}:${{ env.IMAGE_TAG }} .
 
     - name: Push Docker image
       run: |
-        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
-        echo "Image pushed to ECR: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}"
+        docker push ${{ steps.ecr-repo.outputs.repository_uri }}:${{ env.IMAGE_TAG }}
+        echo "Image successfully pushed to ECR"
+        echo "image_uri=${{ steps.ecr-repo.outputs.repository_uri }}:${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
 
-    - name: Verify image in ECR
+    - name: Verify pushed image
       run: |
         aws ecr describe-images \
           --repository-name ${{ env.ECR_REPO }} \
           --image-ids imageTag=${{ env.IMAGE_TAG }}
-    
-    - name: Debug ECR repositories
-      run: |
-        aws ecr describe-repositories
-        aws ecr describe-images --repository-name ${{ env.ECR_REPO }} || echo "No images in repository"
