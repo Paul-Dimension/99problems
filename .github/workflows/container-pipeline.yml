@@ -58,3 +58,8 @@ jobs:
         aws ecr describe-images \
           --repository-name ${{ env.ECR_REPO }} \
           --image-ids imageTag=${{ env.IMAGE_TAG }}
+    
+    - name: Debug ECR repositories
+      run: |
+        aws ecr describe-repositories
+        aws ecr describe-images --repository-name ${{ env.ECR_REPO }} || echo "No images in repository"
