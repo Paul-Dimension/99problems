@@ -28,20 +28,33 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
-        aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
 
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v1
+      with:
+        mask-password: 'true'
 
-    - name: Verify ECR repository exists
+    - name: Create ECR repository if not exists
       run: |
-        aws ecr describe-repositories --repository-names ${{ env.ECR_REPO }} || \
-        aws ecr create-repository --repository-name ${{ env.ECR_REPO }}
+        if ! aws ecr describe-repositories --repository-names ${{ env.ECR_REPO }} >/dev/null 2>&1; then
+          aws ecr create-repository --repository-name ${{ env.ECR_REPO }}
+          echo "Repository ${{ env.ECR_REPO }} created"
+        else
+          echo "Repository ${{ env.ECR_REPO }} already exists"
+        fi
 
-    - name: Build and push Docker image
+    - name: Build Docker image
       run: |
         docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }} .
-        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
 
-  # Остальные шаги (deploy-to-staging, deploy-to-production) остаются без изменений
+    - name: Push Docker image
+      run: |
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
+        echo "Image pushed to ECR: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}"
+
+    - name: Verify image in ECR
+      run: |
+        aws ecr describe-images \
+          --repository-name ${{ env.ECR_REPO }} \
+          --image-ids imageTag=${{ env.IMAGE_TAG }}
