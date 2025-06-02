@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_REGION: 'us-east-1'
+  AWS_REGION: 'us-east-2'
   ECR_REPO: '99problems'
   IMAGE_TAG: 'latest'
 
